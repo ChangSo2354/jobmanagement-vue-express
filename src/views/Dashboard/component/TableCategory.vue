@@ -1,23 +1,40 @@
 <script setup>
-    import { ref, computed } from "vue";
+    import { useCategoryStore } from "@/stores/category";
+import { defineStore } from "pinia";
+    import { ref, computed, onMounted } from "vue";
+import { useToast } from "vue-toastification";
 
     // Total fake items and pagination settings
-    const totalItems = 50; // total rows
+    // const totalItems = 50; // total rows
+
+    // add props
+    const props = defineProps({
+  searchTerm: { type: String, default: '' },
+})
+
     const perPage = 5;
     const currentPage = ref(1);
+    const categoryStore = useCategoryStore()
+    const isloading = ref(false)
+    const toast = useToast()
+
+    // create function filter
+    const filterCategory = computed(() => {
+        if(!props.searchTerm) return categoryStore.categories;
+        
+        return categoryStore.categories.filter((cat) =>
+           cat.category.toLowerCase().includes(props.searchTerm.toLowerCase())
+        )
+    })
 
     // Total pages
-    const totalPages = computed(() => Math.ceil(totalItems / perPage));
+    const totalPages = computed(() => Math.ceil(filterCategory.value.length / perPage));
 
     // Generate rows for the current page
     const pageItems = computed(() => {
-        const start = (currentPage.value - 1) * perPage + 1;
-        const end = Math.min(start + perPage - 1, totalItems);
-        const items = [];
-        for (let i = start; i <= end; i++) {
-            items.push(i);
-        }
-        return items;
+        const start = (currentPage.value - 1) * perPage
+
+        return filterCategory.value.slice(start, start + perPage)
     });
 
     function goToPage(page) {
@@ -38,35 +55,58 @@
       showDeleteCategoryModal.value = false;
     }
 
-    function confirmDelete() {
-      console.log("Delete job with ID:", deleteId.value);
-      // TODO: call your API delete function here
-      closeModalDelete();
+    async function confirmDelete() {
+      try{
+        isloading.value = true
+        await categoryStore.deleteCategory(deleteId.value)
+        await categoryStore.fetchallcategory()
+        closeModalDelete();
+        toast.success("Delete success")
+      }catch(e){
+        console.log("Error fetch category")
+      }finally{
+        isloading.value = false
+      }
     }
 
 
     // --- Modal Update ---
     const showUpdateCategoryModal = ref(false);
-    const updateCategory = ref(null)
+    const updateCategory = ref({})
    
 
-    function openModalUpdate(id) {
-      updateCategory.value = id; // clone object so editing won't affect original
+    function openModalUpdate(cat) {
+      updateCategory.value = {...cat} // clone object so editing won't affect original
       showUpdateCategoryModal.value = true;
     }
 
     function closeModalUpdate() {
       showUpdateCategoryModal.value = false;
-      updateJob.value = {};
+      updateCategory.value = {};
     }
 
-    function saveUpdate() {
-      console.log("Update Category:", updateCategory.value);
-      // TODO: Call API update
-      // Example: await axios.put(`/api/jobs/${updateJob.value.id}`, updateJob.value)
-
-      showUpdateCategoryModal.value = false;
+    async function saveUpdate() {
+      try{
+        isloading.value = true
+        await categoryStore.updatecategory(updateCategory.value)
+        await categoryStore.fetchallcategory()
+        closeModalUpdate();
+        toast.success("Update Successfully")
+      }catch(e){
+        console.log("Error fetching categories")
+      }finally{
+        isloading.value = false
+      }
     }
+
+    onMounted( async () => {
+        try{
+            await categoryStore.fetchallcategory();
+            console.log(categoryStore.categories)
+        }catch(e){
+
+        }
+    })
 </script>
 
 <template>
@@ -87,24 +127,24 @@
         </thead>
 
         <tbody>
-            <tr v-for="i in pageItems" :key="i">
-            <td class="p-2 border border-gray-500 text-blue-900 text-center">{{ i }}</td>
+            <tr v-for="(cat, index) in pageItems" :key="cat.id">
+            <td class="p-2 border border-gray-500 text-blue-900 text-center">{{ index + 1 + (currentPage - 1) * perPage }}</td>
             <td class="p-2 border border-gray-500 text-blue-900">
-                <p>Junior Level</p>
+                <p>{{ cat.category }}</p>
             </td>
             
             <td class="p-2 border border-gray-500 text-blue-900 text-center">
-                <span class="bg-gray-200 text-gray-700 px-1 rounded-lg">2025-08-23</span>
+                <span class="bg-gray-200 text-gray-700 px-1 rounded-lg">{{ cat.created_at }}</span>
             </td>
             <td class="p-2 border border-gray-500 text-blue-900 text-center">
-                <span class="bg-gray-200 text-gray-700 px-1 rounded-lg">2025-08-23</span>
+                <span class="bg-gray-200 text-gray-700 px-1 rounded-lg">{{ cat.updated_at }}</span>
             </td>
             <td class="p-2 border border-gray-500 text-blue-900">
                 <div class="flex justify-center">
-                <button @click="openModalUpdate(i)"  class="mx-1 border p-1 rounded-lg border-amber-600 text-amber-600">
+                <button @click="openModalUpdate(cat)"  class="mx-1 border p-1 rounded-lg border-amber-600 text-amber-600">
                     <v-icon name="bi-pen-fill" />
                 </button>
-                <button @click="openModalDelete(i)" class="mx-1 border p-1 rounded-lg border-red-600 text-red-600">
+                <button @click="openModalDelete(cat.id)" class="mx-1 border p-1 rounded-lg border-red-600 text-red-600">
                     <v-icon name="bi-trash" />
                 </button>
                 </div>
@@ -160,13 +200,10 @@
             </div>
 
             <div class="flex justify-end gap-2 mb-4">
-            <button @click="closeModalDelete" class="px-3 py-1 border rounded">អត់ទេ</button>
-            <button
-                @click="confirmDelete"
-                class="px-3 py-1 border rounded bg-red-600 text-white"
-            >
-                បាទ
-            </button>
+            <button type="button" @click="closeModalUpdate" class="px-3 py-1 border rounded">Cancel</button>
+            <button :disabled="isloading" type="submit" @click="confirmDelete" :class="isloading ? `px-3 py-1 border rounded bg-gray-400 text-white`: 'px-3 py-1 border rounded bg-blue-900 text-white'">
+                        {{ isloading ? 'ចាំតិចបងដូចបងចាំគេ...' : 'យល់ព្រមណាបងសុំលាញ់' }}
+                    </button>
             </div>
         </form>
         
@@ -189,7 +226,7 @@
             <div class="flex justify-between ">
             <div class="mb-2 w-[400px] me-2">
                 <label class="text-gray-500">ប្រភេទការងារ</label>
-                <input type="text" class="w-full border mt-1 p-2 rounded outline-0" placeholder="បញូលប្រភេទការងាររបស់ក្រុមហ៊ុន"/>
+                <input v-model="updateCategory.category" type="text" class="w-full border mt-1 p-2 rounded outline-0" placeholder="បញូលប្រភេទការងាររបស់ក្រុមហ៊ុន"/>
             </div>
             </div>
             <!-- name / salary-range -->
@@ -199,7 +236,9 @@
             <!-- button group -->
             <div class="flex justify-end gap-2 mt-4">
             <button type="button" @click="closeModalUpdate" class="px-3 py-1 border rounded">Cancel</button>
-            <button type="submit" @click="saveUpdate" class="px-3 py-1 border rounded bg-blue-900 text-white">Save</button>
+            <button :disabled="isloading" type="submit" @click="saveUpdate" :class="isloading ? `px-3 py-1 border rounded bg-gray-400 text-white`: 'px-3 py-1 border rounded bg-blue-900 text-white'">
+                        {{ isloading ? 'Waite for update' : 'Save' }}
+                    </button>
             </div>
             <!-- button group -->
         </form>
